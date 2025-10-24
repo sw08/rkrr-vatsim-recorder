@@ -39,11 +39,7 @@ class VatsimScraper:
         if (a := (fp1 is None)) ^ (b := (fp2 is None)):
             return False
         if not a and not b:
-            keys_to_check = ["departure", "arrival", "aircraft"]
-            for key in keys_to_check:
-                if fp1.get(key) != fp2.get(key):
-                    return False
-        return True
+            return fp1["revision_id"] == fp2["revision_id"]
 
     def new_connection(self, conn_type, data):
         if conn_type == "pilot":
