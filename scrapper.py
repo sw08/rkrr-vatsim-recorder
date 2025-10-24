@@ -48,8 +48,10 @@ class VatsimScraper:
     def new_connection(self, conn_type, data):
         if conn_type == "pilot":
             self.pilots[data["callsign"]] = data
+            self.pilots[data["callsign"]]["end_status"] = "normal"
         else:
             self.controllers[data["callsign"]] = data
+            self.controllers[data["callsign"]]["end_status"] = "normal"
         self.log(f"New {conn_type} connection: {data['callsign']}")
 
     def end_connection(self, conn_type, callsign):
@@ -66,6 +68,10 @@ class VatsimScraper:
             self.pilots[data["callsign"]]["last_updated"] = data["last_updated"]
         else:
             self.controllers[data["callsign"]]["last_updated"] = data["last_updated"]
+
+    # def filter_rkrr(self, connections):
+    #     result = []
+    #     for conn in connections:
 
     def update(self):
         try:
@@ -134,6 +140,12 @@ class VatsimScraper:
             time.sleep(300)
 
     def stop(self):
+        for i in list(self.controllers.keys()):
+            self.controllers[i]["end_status"] = "scraper_stopped"
+            self.end_connection("controller", i)
+        for i in list(self.pilots.keys()):
+            self.pilots[i]["end_status"] = "scraper_stopped"
+            self.end_connection("pilot", i)
         self.active = False
         self.dump_data()
         self.log(f"Scraper stopped at {datetime.datetime.now()}")
