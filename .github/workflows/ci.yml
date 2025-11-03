@@ -1,0 +1,47 @@
+name: Build and Deploy Site
+
+on:
+  push:
+    branches: [data, web]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.11
+          cache: pip
+      - uses: actions/checkout@v4
+        with:
+          ref: web
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          ref: data
+          path: data_raw
+      - run: |
+          mkdir -p source/data
+          cd data_raw
+          pip install -r requirements.txt
+          python build.py
+          cp -r data_processed/* ../source/data/ || true
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./source"
+          
+  deploy:
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment          
