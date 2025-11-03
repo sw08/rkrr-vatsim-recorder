@@ -77,7 +77,7 @@ class VatsimScraper:
             pilot_updated = 0
             for p in current_pilots:
                 if p is None:
-                    raise Exception("Received NoneType pilot data from VATSIM.")
+                    continue
                 if p["callsign"] not in self.pilots:
                     self.new_connection("pilot", p, status=status)
                 elif not VatsimScraper.is_same_connection(
@@ -96,6 +96,9 @@ class VatsimScraper:
             current_controllers = response["controllers"]
             controller_updated = 0
             for c in current_controllers:
+                if c is None:
+                    continue
+
                 if c["callsign"] not in self.controllers:
                     self.new_connection("controller", c, status=status)
                 elif not VatsimScraper.is_same_connection(
