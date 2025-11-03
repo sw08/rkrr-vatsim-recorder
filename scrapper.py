@@ -78,6 +78,15 @@ class VatsimScraper:
             for p in current_pilots:
                 if p is None:
                     continue
+                if p["flight_plan"] is None:
+                    continue
+                if not sum(
+                    [
+                        p["flight_plan"][i][:2] in ["RK", "ZK"]
+                        for i in ["departure", "arrival", "alternate"]
+                    ]
+                ):
+                    continue
                 if p["callsign"] not in self.pilots:
                     self.new_connection("pilot", p, status=status)
                 elif not VatsimScraper.is_same_connection(
@@ -98,7 +107,10 @@ class VatsimScraper:
             for c in current_controllers:
                 if c is None:
                     continue
-
+                if not (
+                    c["callsign"].startswith("RK") or c["callsign"].startswith("ZK")
+                ):
+                    continue
                 if c["callsign"] not in self.controllers:
                     self.new_connection("controller", c, status=status)
                 elif not VatsimScraper.is_same_connection(
