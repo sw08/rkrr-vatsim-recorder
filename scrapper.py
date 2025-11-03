@@ -27,7 +27,7 @@ class VatsimScraper:
         self.webhook_url = webhook_url
         self.cdata = []
         self.pdata = []
-        self.update()
+        self.update(first=True)
 
     @staticmethod
     def is_same_connection(i1, i2):
@@ -41,13 +41,13 @@ class VatsimScraper:
         if not a and not b:
             return fp1["revision_id"] == fp2["revision_id"]
 
-    def new_connection(self, conn_type, data):
+    def new_connection(self, conn_type, data, status="normal"):
         if conn_type == "pilot":
             self.pilots[data["callsign"]] = data
-            self.pilots[data["callsign"]]["end_status"] = "normal"
+            self.pilots[data["callsign"]]["end_status"] = status
         else:
             self.controllers[data["callsign"]] = data
-            self.controllers[data["callsign"]]["end_status"] = "normal"
+            self.controllers[data["callsign"]]["end_status"] = status
         self.log(f"New {conn_type} connection: {data['callsign']}")
 
     def end_connection(self, conn_type, callsign):
@@ -69,8 +69,9 @@ class VatsimScraper:
     #     result = []
     #     for conn in connections:
 
-    def update(self):
+    def update(self, first=False):
         try:
+            status = "scrapper_started" if first else "normal"
             response = requests.request("GET", url, headers=headers).json()
             current_pilots = response["pilots"]
             pilot_updated = 0
@@ -78,12 +79,12 @@ class VatsimScraper:
                 if p is None:
                     raise Exception("Received NoneType pilot data from VATSIM.")
                 if p["callsign"] not in self.pilots:
-                    self.new_connection("pilot", p)
+                    self.new_connection("pilot", p, status=status)
                 elif not VatsimScraper.is_same_connection(
                     p, self.pilots[p["callsign"]]
                 ):
                     self.end_connection("pilot", p["callsign"])
-                    self.new_connection("pilot", p)
+                    self.new_connection("pilot", p, status=status)
                 else:
                     self.update_last_seen("pilot", p)
                 pilot_updated += 1
@@ -96,12 +97,12 @@ class VatsimScraper:
             controller_updated = 0
             for c in current_controllers:
                 if c["callsign"] not in self.controllers:
-                    self.new_connection("controller", c)
+                    self.new_connection("controller", c, status=status)
                 elif not VatsimScraper.is_same_connection(
                     c, self.controllers[c["callsign"]]
                 ):
                     self.end_connection("controller", c["callsign"])
-                    self.new_connection("controller", c)
+                    self.new_connection("controller", c, status=status)
                 else:
                     self.update_last_seen("controller", c)
                 controller_updated += 1
