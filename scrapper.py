@@ -43,10 +43,29 @@ class VatsimScraper:
 
     def new_connection(self, conn_type, data, status="normal"):
         if conn_type == "pilot":
-            self.pilots[data["callsign"]] = data
+            self.pilots[data["callsign"]] = {}
+            for i in [
+                "cid",
+                "name",
+                "callsign",
+                "flight_plan",
+                "logon_time",
+                "last_updated",
+            ]:
+                self.pilots[data["callsign"]][i] = data[i]
             self.pilots[data["callsign"]]["end_status"] = status
         else:
-            self.controllers[data["callsign"]] = data
+            self.controllers[data["callsign"]] = {}
+            for i in [
+                "cid",
+                "name",
+                "callsign",
+                "facility",
+                "rating",
+                "logon_time",
+                "last_updated",
+            ]:
+                self.controllers[data["callsign"]][i] = data[i]
             self.controllers[data["callsign"]]["end_status"] = status
         self.log(f"New {conn_type} connection: {data['callsign']}")
 
@@ -110,6 +129,8 @@ class VatsimScraper:
                 if not (
                     c["callsign"].startswith("RK") or c["callsign"].startswith("ZK")
                 ):
+                    continue
+                if c["facility"] == 0:  # skip observers
                     continue
                 if c["callsign"] not in self.controllers:
                     self.new_connection("controller", c, status=status)
