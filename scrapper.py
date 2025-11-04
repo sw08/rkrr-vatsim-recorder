@@ -53,10 +53,10 @@ class VatsimScraper:
                 "name",
                 "callsign",
                 "flight_plan",
-                "logon_time",
-                "last_updated",
             ]:
                 self.pilots[data["callsign"]][i] = data[i]
+            self.pilots[data["callsign"]]["logon_time"] = data["logon_time"][:19]
+            self.pilots[data["callsign"]]["last_updated"] = data["last_updated"][:19]
             self.pilots[data["callsign"]]["end_status"] = status
         else:
             self.controllers[data["callsign"]] = {}
@@ -66,11 +66,13 @@ class VatsimScraper:
                 "callsign",
                 "facility",
                 "rating",
-                "logon_time",
-                "last_updated",
                 "frequency",
             ]:
                 self.controllers[data["callsign"]][i] = data[i]
+            self.controllers[data["callsign"]]["logon_time"] = data["logon_time"][:19]
+            self.controllers[data["callsign"]]["last_updated"] = data["last_updated"][
+                :19
+            ]
             self.controllers[data["callsign"]]["end_status"] = status
         self.log(f"New {conn_type} connection: {data['callsign']}")
 
@@ -85,9 +87,11 @@ class VatsimScraper:
 
     def update_last_seen(self, conn_type, data):
         if conn_type == "pilot":
-            self.pilots[data["callsign"]]["last_updated"] = data["last_updated"]
+            self.pilots[data["callsign"]]["last_updated"] = data["last_updated"][:19]
         else:
-            self.controllers[data["callsign"]]["last_updated"] = data["last_updated"]
+            self.controllers[data["callsign"]]["last_updated"] = data["last_updated"][
+                :19
+            ]
 
     # def filter_rkrr(self, connections):
     #     result = []
