@@ -30,8 +30,12 @@ class VatsimScraper:
         self.update(first=True)
 
     @staticmethod
-    def is_same_connection(i1, i2):
-        if not (i1["cid"] == i2["cid"] and i1["callsign"] == i2["callsign"]):
+    def is_same_cid_and_callsign(i1, i2):
+        return i1["cid"] == i2["cid"] and i1["callsign"] == i2["callsign"]
+
+    @staticmethod
+    def is_same_flight(i1, i2):
+        if not VatsimScraper.is_same_cid_and_callsign(i1, i2):
             return False
 
         fp1 = i1["flight_plan"] if "flight_plan" in i1 else None
@@ -108,9 +112,7 @@ class VatsimScraper:
                     continue
                 if p["callsign"] not in self.pilots:
                     self.new_connection("pilot", p, status=status)
-                elif not VatsimScraper.is_same_connection(
-                    p, self.pilots[p["callsign"]]
-                ):
+                elif not VatsimScraper.is_same_flight(p, self.pilots[p["callsign"]]):
                     self.end_connection("pilot", p["callsign"])
                     self.new_connection("pilot", p, status=status)
                 else:
@@ -134,7 +136,7 @@ class VatsimScraper:
                     continue
                 if c["callsign"] not in self.controllers:
                     self.new_connection("controller", c, status=status)
-                elif not VatsimScraper.is_same_connection(
+                elif not VatsimScraper.is_same_cid_and_callsign(
                     c, self.controllers[c["callsign"]]
                 ):
                     self.end_connection("controller", c["callsign"])
