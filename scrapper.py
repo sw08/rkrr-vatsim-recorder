@@ -165,8 +165,11 @@ class VatsimScraper:
         day = now.day
         hour = now.hour
         while self.active:
-            if day != (new := datetime.datetime.now().day):
+            now = datetime.datetime.now()
+            if day != now.day:
                 os.chdir(self.save_directory)
+                with open(os.path.join(self.log_directory, "last_push.txt"), "w") as f:
+                    f.write(now.strftime("%Y-%m-%d"))
                 os.system("git add .")
                 os.system(
                     f'git commit -m "Automatic daily commit by VATSIM Scraper: {day}"'
@@ -174,11 +177,11 @@ class VatsimScraper:
                 os.system("git push origin main")
                 os.chdir(os.path.dirname(os.path.abspath(__file__)))
                 self.log(f"New day: github pushed for day {day}")
-                day = new
-            if hour != (new := datetime.datetime.now().hour):
-                hour = new
+                day = now.day
+            if hour != now.hour:
                 self.dump_data()
-                self.log(f"New hour: data reset at {hour}")
+                self.log(f"New hour: data for {hour} dumped")
+                hour = now.hour
             result = self.update()
             if result["ok"]:
                 self.log(f"Update successful: {result['data']}")
