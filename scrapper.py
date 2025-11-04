@@ -68,6 +68,7 @@ class VatsimScraper:
                 "rating",
                 "logon_time",
                 "last_updated",
+                "frequency",
             ]:
                 self.controllers[data["callsign"]][i] = data[i]
             self.controllers[data["callsign"]]["end_status"] = status
