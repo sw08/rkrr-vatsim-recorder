@@ -173,7 +173,7 @@ class VatsimScraper:
             now = datetime.datetime.now()
             if day != now.day:
                 os.chdir(self.save_directory)
-                with open(os.path.join(self.log_directory, "last_push.txt"), "w") as f:
+                with open("last_push.txt", "w") as f:
                     f.write(now.strftime("%Y-%m-%d"))
                 os.system("git add .")
                 os.system(
