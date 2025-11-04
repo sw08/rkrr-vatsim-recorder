@@ -161,18 +161,30 @@ class VatsimScraper:
             return {"ok": False, "error": str(e)}
 
     def run(self):
-        day = datetime.datetime.now().day
+        now = datetime.datetime.now()
+        day = now.day
+        hour = now.hour
         while self.active:
             if day != (new := datetime.datetime.now().day):
+                os.chdir(self.save_directory)
+                os.system("git add .")
+                os.system(
+                    f'git commit -m "Automatic daily commit by VATSIM Scraper: {day}"'
+                )
+                os.system("git push origin main")
+                os.chdir(os.path.dirname(os.path.abspath(__file__)))
+                self.log(f"New day: github pushed for day {day}")
                 day = new
+            if hour != (new := datetime.datetime.now().hour):
+                hour = new
                 self.dump_data()
-                self.log(f"New day: data reset at {day}")
+                self.log(f"New hour: data reset at {hour}")
             result = self.update()
             if result["ok"]:
                 self.log(f"Update successful: {result['data']}")
             else:
                 self.log(f"Update failed: {result['error']}")
-            time.sleep(300)
+            time.sleep(150)
 
     def stop(self):
         for i in list(self.controllers.keys()):
