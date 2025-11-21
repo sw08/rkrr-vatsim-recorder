@@ -58,6 +58,8 @@ class VatsimScraper:
             self.pilots[data["callsign"]]["logon_time"] = data["logon_time"][:19]
             self.pilots[data["callsign"]]["last_updated"] = data["last_updated"][:19]
             self.pilots[data["callsign"]]["end_status"] = status
+            self.pilots[data['callsign']]['airbone_time'] = -1
+            self.pilots[data['callsign']]['lowest_alt'] = data['altitude']
         else:
             self.controllers[data["callsign"]] = {}
             for i in [
@@ -85,8 +87,10 @@ class VatsimScraper:
             del self.controllers[callsign]
         self.log(f"Ended {conn_type} connection: {callsign}")
 
-    def update_last_seen(self, conn_type, data):
+    def update_connection(self, conn_type, data):
         if conn_type == "pilot":
+            if self.pilots[data['callsign']]['airbone_time'] == -1 and data['altitude'] - self.pilots[data['callsign']]['lowest_alt'] > 100:
+                self.pilots[data['callsign']]['airbone_time'] = datetime.datetime.now().timestamp()
             self.pilots[data["callsign"]]["last_updated"] = data["last_updated"][:19]
         else:
             self.controllers[data["callsign"]]["last_updated"] = data["last_updated"][
@@ -121,7 +125,7 @@ class VatsimScraper:
                     self.end_connection("pilot", p["callsign"])
                     self.new_connection("pilot", p, status=status)
                 else:
-                    self.update_last_seen("pilot", p)
+                    self.update_connection("pilot", p)
                 pilot_updated += 1
             for p in self.pilots:
                 if p not in [x["callsign"] for x in current_pilots]:
@@ -147,7 +151,7 @@ class VatsimScraper:
                     self.end_connection("controller", c["callsign"])
                     self.new_connection("controller", c, status=status)
                 else:
-                    self.update_last_seen("controller", c)
+                    self.update_connection("controller", c)
                 controller_updated += 1
             for c in self.controllers:
                 if c not in [x["callsign"] for x in current_controllers]:
