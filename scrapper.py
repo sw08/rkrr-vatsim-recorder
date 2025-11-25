@@ -1,5 +1,7 @@
-import time, datetime, requests, json, os, logging
+import time, datetime, requests, json, os, sqlite3, re
 from discord_webhook import DiscordWebhook
+from datetime import timezone
+from math import floor
 
 
 headers = {"Accept": "application/json"}
@@ -15,18 +17,14 @@ class VatsimScraper:
         self.log_directory = log_directory
         if not os.path.exists(self.save_directory):
             os.mkdir(self.save_directory)
-        if not os.path.exists(os.path.join(self.save_directory, "pilots")):
-            os.mkdir(os.path.join(self.save_directory, "pilots"))
-        if not os.path.exists(os.path.join(self.save_directory, "controllers")):
-            os.mkdir(os.path.join(self.save_directory, "controllers"))
+        if not os.path.exists(os.path.join(self.save_directory, "data")):
+            os.mkdir(os.path.join(self.save_directory, "data"))
         if not os.path.exists(self.log_directory):
             os.mkdir(self.log_directory)
         self.active = True
-        self.pilots = {}
-        self.controllers = {}
+        self.actv_conns = {}
+        self.disc_conns = []
         self.webhook_url = webhook_url
-        self.cdata = []
-        self.pdata = []
         self.update(first=True)
 
     @staticmethod
@@ -37,129 +35,111 @@ class VatsimScraper:
     def is_same_flight(i1, i2):
         if not VatsimScraper.is_same_cid_and_callsign(i1, i2):
             return False
+        fp1 = i1["flight_plan"]
+        fp2 = i2["flight_plan"]
+        return fp1["departure"] == fp2["departure"] and fp1["arrival"] == fp2["arrival"]
 
-        fp1 = i1["flight_plan"] if "flight_plan" in i1 else None
-        fp2 = i2["flight_plan"] if "flight_plan" in i2 else None
-        if (a := (fp1 is None)) ^ (b := (fp2 is None)):
-            return False
-        if not a and not b:
-            return fp1["revision_id"] == fp2["revision_id"]
-
-    def new_connection(self, conn_type, data, status="normal"):
-        if conn_type == "pilot":
-            self.pilots[data["callsign"]] = {}
-            for i in [
-                "cid",
-                "name",
-                "callsign",
-                "flight_plan",
-            ]:
-                self.pilots[data["callsign"]][i] = data[i]
-            self.pilots[data["callsign"]]["logon_time"] = data["logon_time"][:19]
-            self.pilots[data["callsign"]]["last_updated"] = data["last_updated"][:19]
-            self.pilots[data["callsign"]]["end_status"] = status
-            self.pilots[data['callsign']]['airbone_time'] = -1
-            self.pilots[data['callsign']]['lowest_alt'] = data['altitude']
+    def new_connection(self, data, status="normal"):
+        if str(data["cid"]) in self.actv_conns:
+            return "Error: Already active connection with this CID"
+        if "flight_plan" in data:
+            self.actv_conns[str(data["cid"])] = {
+                "cid": data["cid"],
+                "callsign": data["callsign"],
+                "flight_plan": data["flight_plan"],
+                "logon_time": data["logon_time"][:19],
+                "last_updated": data["last_updated"][:19],
+                "record_status": status,
+                "airborne_time": -1,
+                "lowest_alt": data["altitude"],
+            }
         else:
-            self.controllers[data["callsign"]] = {}
-            for i in [
-                "cid",
-                "name",
-                "callsign",
-                "facility",
-                "rating",
-                "frequency",
-            ]:
-                self.controllers[data["callsign"]][i] = data[i]
-            self.controllers[data["callsign"]]["logon_time"] = data["logon_time"][:19]
-            self.controllers[data["callsign"]]["last_updated"] = data["last_updated"][
-                :19
-            ]
-            self.controllers[data["callsign"]]["end_status"] = status
-        self.log(f"New {conn_type} connection: {data['callsign']}")
+            self.actv_conns[str(data["cid"])] = {
+                "cid": data["cid"],
+                "callsign": data["callsign"],
+                "facility": data["facility"],
+                "rating": data["rating"],
+                "logon_time": data["logon_time"][:19],
+                "last_updated": data["last_updated"][:19],
+                "record_status": status,
+            }
+        self.log(f"New connection: {data['callsign']}")
 
-    def end_connection(self, conn_type, callsign):
-        if conn_type == "pilot":
-            self.pdata.append(self.pilots[callsign])
-            del self.pilots[callsign]
-        else:
-            self.cdata.append(self.controllers[callsign])
-            del self.controllers[callsign]
-        self.log(f"Ended {conn_type} connection: {callsign}")
+    def end_connection(self, cid, status="normal"):
+        data = self.actv_conns.pop(str(cid))
+        if 'flight_plan' in data:
+            if data["airborne_time"] == -1:
+                return
+        data["record_status"] = (
+            status if data["record_status"] == "normal" else data["record_status"]
+        )
+        self.disc_conns.append(data)
+        self.log(f"Ended connection: {cid} / {data['callsign']}")
 
-    def update_connection(self, conn_type, data):
-        if conn_type == "pilot":
-            if self.pilots[data['callsign']]['airbone_time'] == -1 and data['altitude'] - self.pilots[data['callsign']]['lowest_alt'] > 100:
-                self.pilots[data['callsign']]['airbone_time'] = datetime.datetime.now().timestamp()
-            self.pilots[data["callsign"]]["last_updated"] = data["last_updated"][:19]
-        else:
-            self.controllers[data["callsign"]]["last_updated"] = data["last_updated"][
-                :19
-            ]
-
-    # def filter_rkrr(self, connections):
-    #     result = []
-    #     for conn in connections:
+    def update_connection(self, data):
+        if "flight_plan" in data:
+            if (
+                self.actv_conns[str(data["cid"])]["airborne_time"] == -1
+                and self.actv_conns[str(data["cid"])]["lowest_alt"] + 100
+                < data["altitude"]
+            ):
+                self.actv_conns[str(data["cid"])]["airborne_time"] = floor(
+                    datetime.datetime.now(timezone.utc).timestamp() + 0.5
+                )
+        self.actv_conns[str(data["cid"])]["last_updated"] = data["last_updated"][:19]
 
     def update(self, first=False):
         try:
             status = "scrapper_started" if first else "normal"
             response = requests.request("GET", url, headers=headers).json()
-            current_pilots = response["pilots"]
-            pilot_updated = 0
-            for p in current_pilots:
-                if p is None:
-                    continue
-                if p["flight_plan"] is None:
-                    continue
-                if not sum(
-                    [
-                        p["flight_plan"][i][:2] in ["RK", "ZK"]
-                        for i in ["departure", "arrival", "alternate"]
-                    ]
+            conn_updated = 0
+            pilots_data = []
+            for j in response["pilots"]:
+                if (
+                    j is not None
+                    and j["flight_plan"] is not None
+                    and sum(
+                        [
+                            j["flight_plan"][i][:2] in ["RK", "ZK"]
+                            for i in ["departure", "arrival"]
+                        ]
+                    )
                 ):
-                    continue
-                if p["callsign"] not in self.pilots:
-                    self.new_connection("pilot", p, status=status)
-                elif not VatsimScraper.is_same_flight(p, self.pilots[p["callsign"]]):
-                    self.end_connection("pilot", p["callsign"])
-                    self.new_connection("pilot", p, status=status)
+                    pilots_data.append(j)
+            for p_data in pilots_data:
+                if str(p_data["cid"]) not in self.actv_conns:
+                    self.new_connection(p_data, status=status)
+                elif not VatsimScraper.is_same_flight(
+                    p_data, self.actv_conns[str(p_data["cid"])]
+                ):
+                    self.end_connection(str(p_data["cid"]))
+                    self.new_connection(p_data, status=status)
                 else:
-                    self.update_connection("pilot", p)
-                pilot_updated += 1
-            for p in self.pilots:
-                if p not in [x["callsign"] for x in current_pilots]:
-                    self.end_connection("pilot", p["callsign"])
-                    pilot_updated += 1
+                    self.update_connection(p_data)
+                conn_updated += 1
 
-            current_controllers = response["controllers"]
-            controller_updated = 0
-            for c in current_controllers:
-                if c is None:
-                    continue
-                if not (
-                    c["callsign"].startswith("RK") or c["callsign"].startswith("ZK")
-                ):
-                    continue
-                if c["facility"] == 0:  # skip observers
-                    continue
-                if c["callsign"] not in self.controllers:
-                    self.new_connection("controller", c, status=status)
+            controllers_data = [
+                i for i in response["controllers"] if i is not None and i['facility'] != 0 and i["callsign"][:2] in ["RK", "ZK"]
+            ]
+            for c_data in controllers_data:
+                if str(c_data["cid"]) not in self.actv_conns:
+                    self.new_connection(c_data, status=status)
                 elif not VatsimScraper.is_same_cid_and_callsign(
-                    c, self.controllers[c["callsign"]]
+                    c_data, self.actv_conns[str(c_data["cid"])]
                 ):
-                    self.end_connection("controller", c["callsign"])
-                    self.new_connection("controller", c, status=status)
+                    self.end_connection(str(c_data["cid"]))
+                    self.new_connection(c_data, status=status)
                 else:
-                    self.update_connection("controller", c)
-                controller_updated += 1
-            for c in self.controllers:
-                if c not in [x["callsign"] for x in current_controllers]:
-                    self.end_connection("controller", c["callsign"])
-                    controller_updated += 1
+                    self.update_connection(c_data)
+                conn_updated += 1
+            actv_cids = [str(i["cid"]) for i in pilots_data + controllers_data]
+            for cid in list([i for i in self.actv_conns]):
+                if not cid in actv_cids:
+                    conn_updated += 1
+                    self.end_connection(str(cid))
             return {
                 "ok": True,
-                "data": f"Pilots updated: {pilot_updated}, Controllers updated: {controller_updated}",
+                "data": f"Connections updated: {conn_updated}",
             }
         except Exception as e:
             # raise e  # disable error handling for test
@@ -170,15 +150,23 @@ class VatsimScraper:
             return {"ok": False, "error": str(e)}
 
     def run(self):
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(timezone.utc)
         day = now.day
         hour = now.hour
         while self.active:
-            now = datetime.datetime.now()
+            time.sleep(60)
+            result = self.update()
+            if result["ok"]:
+                self.log(f"Update successful: {result['data']}")
+            else:
+                self.log(f"Update failed: {result['error']}")
+            now = datetime.datetime.now(timezone.utc)
+            if hour != now.hour:
+                self.dump_data()
+                self.log(f"New hour: data for {hour} dumped")
+                hour = now.hour
             if day != now.day:
                 os.chdir(self.save_directory)
-                with open("last_push.txt", "w") as f:
-                    f.write(now.strftime("%Y-%m-%d"))
                 os.system("git add .")
                 os.system(
                     f'git commit -m "Automatic daily commit by VATSIM Scraper: {day}"'
@@ -187,65 +175,105 @@ class VatsimScraper:
                 os.chdir(os.path.dirname(os.path.abspath(__file__)))
                 self.log(f"New day: github pushed for day {day}")
                 day = now.day
-            if hour != now.hour:
-                self.dump_data()
-                self.log(f"New hour: data for {hour} dumped")
-                hour = now.hour
-            result = self.update()
-            if result["ok"]:
-                self.log(f"Update successful: {result['data']}")
-            else:
-                self.log(f"Update failed: {result['error']}")
-            time.sleep(150)
 
     def stop(self):
-        for i in list(self.controllers.keys()):
-            self.controllers[i]["end_status"] = "scraper_stopped"
-            self.end_connection("controller", i)
-        for i in list(self.pilots.keys()):
-            self.pilots[i]["end_status"] = "scraper_stopped"
-            self.end_connection("pilot", i)
+        for i in list(self.actv_conns.keys()):
+            self.end_connection(i, status="scraper_stopped")
         self.active = False
         self.dump_data()
-        self.log(f"Scraper stopped at {datetime.datetime.now()}")
+        self.log(f"Scraper stopped at {datetime.datetime.now(timezone.utc)}")
 
     def log(self, message):
-        today = datetime.datetime.now().strftime("%y%m%d")
+        today = datetime.datetime.now(timezone.utc).strftime("%y%m%d")
         with open(os.path.join(self.log_directory, today + ".json"), "a") as log_file:
-            log_file.write(f"{datetime.datetime.now()}: {message}\n")
-        print(f"{datetime.datetime.now()}: {message}")
+            log_file.write(f"{datetime.datetime.now(timezone.utc)}: {message}\n")
+        print(f"{datetime.datetime.now(timezone.utc)}: {message}")
 
     def dump_data(self):
-        today = datetime.datetime.now().strftime("%y%m%d")
-        pdata = self.pdata
-        if os.path.isfile(
-            route := os.path.join(self.save_directory, "pilots", today + ".json")
-        ):
-            with open(route, "r") as f:
-                pdata = json.load(f)
-            pdata.extend(self.pdata)
-            self.log(f"Existing pilot data found for {today}, appending data.")
-        with open(
-            os.path.join(self.save_directory, "pilots", today + ".json"), "w"
-        ) as f:
-            json.dump(pdata, f)
-        self.log(f"Pilot data dumped for {today}: {len(self.pdata)} records.")
-        self.pdata = []
+        dbs = {}
+        cVr = re.compile(r"/[Vv]/")
+        cRr = re.compile(r"/[Rr]/")
+        pilots_dumped = 0
+        controllers_dumped = 0
+        for i in self.disc_conns:
+            if "flight_plan" in i:
+                save_ts = datetime.datetime.fromtimestamp(i["airborne_time"])
+            else:
+                save_ts = datetime.datetime.strptime(
+                    i["logon_time"], "%Y-%m-%dT%H:%M:%S"
+                )
+            if (day := save_ts.strftime("%y%m%d")) not in dbs:
+                dbs[day] = (w := sqlite3.connect(
+                    os.path.join(self.save_directory, "data", f"{day}.db")
+                ), w.cursor())
+                dbs[day][1].execute(
+                    """CREATE TABLE IF NOT EXISTS pilots
+                                  (callsign TEXT, departure TEXT, arrival TEXT, alternate TEXT, acft TEXT,
+                                   logon_time INTEGER, last_updated INTEGER,
+                                   record_normal INTEGER, airborne_time INTEGER,
+                                   route TEXT, comm INTEGER, flight_rule INTEGER)"""
+                )
+                dbs[day][1].execute(
+                    """CREATE TABLE IF NOT EXISTS controllers (callsign TEXT, facility INTEGER, rating INTEGER, record_normal INTEGER, logon_time INTEGER, last_updated INTEGER)"""
+                )
+                dbs[day][0].commit()
+            if "flight_plan" in i:
+                if cVr.search(i["flight_plan"]["remarks"]):
+                    fr = 2
+                elif cRr.search(i["flight_plan"]["remarks"]):
+                    fr = 1
+                else:
+                    fr = 0
 
-        cdata = self.cdata
-        if os.path.isfile(
-            route := os.path.join(self.save_directory, "controllers", today + ".json")
-        ):
-            with open(route, "r") as f:
-                cdata = json.load(f)
-            cdata.extend(self.cdata)
-            self.log(f"Existing controller data found for {today}, appending data.")
-        with open(
-            os.path.join(self.save_directory, "controllers", today + ".json"), "w"
-        ) as f:
-            json.dump(cdata, f)
-        self.log(f"Controller data dumped for {today}: {len(self.cdata)} records.")
-        self.cdata = []
+                dbs[day][1].execute(
+                    """INSERT INTO pilots (callsign, departure, arrival, alternate, acft,
+                                            logon_time, last_updated,
+                                            record_normal, airborne_time,
+                                            route, comm, flight_rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        i["callsign"],
+                        i["flight_plan"]["departure"],
+                        i["flight_plan"]["arrival"],
+                        i["flight_plan"]["alternate"],
+                        i["flight_plan"]["aircraft_short"],
+                        datetime.datetime.strptime(
+                            i["logon_time"], "%Y-%m-%dT%H:%M:%S"
+                        ).timestamp(),
+                        datetime.datetime.strptime(
+                            i["last_updated"], "%Y-%m-%dT%H:%M:%S"
+                        ).timestamp(),
+                        i["record_status"] == "normal",
+                        i["airborne_time"],
+                        i["flight_plan"]["route"],
+                        fr,
+                        i["flight_plan"]["flight_rules"] == "I",
+                    ),
+                )
+                pilots_dumped += 1
+            else:
+                dbs[day][1].execute(
+                    """INSERT INTO controllers (callsign, facility, rating, record_normal, logon_time, last_updated) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        i["callsign"],
+                        i["facility"],
+                        i["rating"],
+                        i["record_status"] == "normal",
+                        datetime.datetime.strptime(
+                            i["logon_time"], "%Y-%m-%dT%H:%M:%S"
+                        ).timestamp(),
+                        datetime.datetime.strptime(
+                            i["last_updated"], "%Y-%m-%dT%H:%M:%S"
+                        ).timestamp(),
+                    ),
+                )
+                controllers_dumped += 1
+        for i in dbs:
+            dbs[i][0].commit()
+            dbs[i][0].close()
+        self.disc_conns = []
+        self.log(
+            f"Dumped data: {pilots_dumped} pilots, {controllers_dumped} controllers"
+        )
 
 
 vs = VatsimScraper(
