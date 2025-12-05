@@ -169,9 +169,9 @@ class VatsimScraper:
                 os.chdir(self.save_directory)
                 os.system("git add .")
                 os.system(
-                    f'git commit -m "Automatic daily commit by VATSIM Scraper: {day}"'
+                    f'git commit -m "Automatic daily commit by VATSIM Scraper: {now.month} / {day}"'
                 )
-                os.system("git push origin main")
+                os.system("git push")
                 os.chdir(os.path.dirname(os.path.abspath(__file__)))
                 self.log(f"New day: github pushed for day {day}")
                 day = now.day
