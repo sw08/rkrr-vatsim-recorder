@@ -17,21 +17,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: web
-          path: source
+          path: result
       - uses: actions/checkout@v4
         with:
           ref: data
-          path: data_raw
+          path: data
       - run: |
-          mkdir -p source/data
-          cd data_raw
-          pip install -r requirements.txt
-          python build.py
-          cp -r data_processed/* ../source/data/ || true
+          cp -r ./data ./result/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: "./source"
+          path: "./result"
           
   deploy:
     needs: build
