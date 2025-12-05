@@ -165,7 +165,7 @@ class VatsimScraper:
                 self.dump_data()
                 self.log(f"New hour: data for {hour} dumped")
                 hour = now.hour
-            if day != now.day:
+            if day != now.day and not config['debug']:
                 os.chdir(self.save_directory)
                 os.system("git add .")
                 os.system(
